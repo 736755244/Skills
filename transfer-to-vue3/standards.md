@@ -38,7 +38,7 @@ tags:
 | 页面组件 | `src/views/prototype/{name}/index.vue` 或 `src/views/{业务模块}/{页面}/index.vue` |
 | 页面子组件 | 页面同级的 `components/*.vue` |
 | Mock 数据 | 页面目录下 `{name}/mock.ts` |
-| API 类型与预留位 | `src/api/{业务模块}/{resource}.ts`（`dist-to-vue3` 阶段生成） |
+| API 类型与预留位 | `src/api/{业务模块}/{resource}.ts`（`dist-to-vue3` 阶段生成；契约类型集中在文件上部，接口方法在下部） |
 | prototype 路由 | `src/router/modules/remaining.ts` 末尾追加 |
 | restore 路由 | 定义在 `src/router/modules/restore.ts`，由 `remaining.ts` 在 catch-all 前展开 |
 
@@ -51,7 +51,9 @@ tags:
 
 - 使用 `<script setup>`、Composition API 与 Element Plus 语义组件；HTML 控件按等价 Element Plus 组件转换。
 - DOM 事件和直接 DOM 操作改为响应式状态、Vue 事件和声明式渲染。
-- 弹窗使用项目全局 `Dialog`，以 `ref` + `open()` + `defineExpose` 暴露命令式入口；细节见 checklist B 段。
+- 弹窗使用项目全局 `Dialog`，以 `ref` + `open()` + `defineExpose` 暴露命令式入口；尺寸口径固定下来：宽度只取 `600 / 900 / 1200 / 1400` 四档，高度由内容根节点给唯一一次 `calc(100vh - 300px)` 配 `:scroll="false"`，禁止双层滚动与页内自定义高度；细节见 checklist B-007、B-013。
+- 全局 `Dialog` 的 class 落在 `.el-dialog` **同一个元素**上。在 `Dialog.vue` 里给自身加样式必须写 `&.#{$elNamespace}-dialog`；写成 `.com-dialog .el-dialog` 是后代选择器，命中 0，规则静默失效。`Dialog.vue` 里既有的 `.el-dialog { margin: 0 !important; … }` 块就是这种死代码，所以弹窗现在靠 `top` prop 的 `8vh` 定位、**垂直不居中**；同文件那条 `.com-dialog .el-overlay-dialog { display: flex; align-items: center }` 也是反向命中（overlay 是 `.com-dialog` 的祖先），一并算死代码。要改垂直居中，得先确认全部弹窗的位置变化可接受，再动这两块。
+- 未使用的全局组件连同首页挂载一起删除：`App.vue` 里的标签与 `import` 一并去掉；`src/types/auto-components.d.ts` 由 `unplugin-vue-components` 生成，不手改（删了也会重新长出来）。
 - Tab 切换不得读取、写入或删除 URL 的 path/hash/query，不得调用 `router.push` / `router.replace`。
 - 页面样式写在当前 SFC 的 `<style lang="scss" scoped>`；保留源页面使用的类名、DOM 层级和区域顺序；禁止创建或修改全局 CSS。
 - **同一控件在两个页面要「一样」时，抽共享组件，不复制样式**：把形态与样式搬进同模块 `components/` 下的一个小组件（只接受数据 + 一个 `change` 事件），两个页面都挂它；被搬空的那页要顺手删掉自己那份样式块和注释掉的旧实现（如整块 `<!-- <el-button v-for …> -->`）。复制过去的那份 CSS 会在两处各自漂移。转换/还原不留注释掉的旧实现。
@@ -110,8 +112,11 @@ tags:
 - `dist-to-vue3` 仅可依据输入中可核实的证据生成接口契约类型和无真实调用的预留方法；无 URL、字段、入参或响应证据时必须写 `TODO`，不得猜测。
 - 真实接口接入仅能在用户显式调用 `apifox-link`、完成契约核对并确认范围后进行；API 文件存在不构成请求授权。
 - API 文件仅包含契约 `type` / `interface`、必要请求封装 import、API 方法及证据/TODO 注释。每个方法仅接受一个业务入参：GET 使用 `params`，POST/PUT/DELETE 使用 `data`，并原样透传。
+- **API 文件内部只有三段，顺序固定**：① `import`；② 类型区——本文件全部 `type` / `interface` 集中在此，连同各自的文档注释和 `// ===== xxx =====` 分段注释一起上移，**不得穿插在方法之间或写在方法之后**；③ 接口方法区——`export const` 方法与其证据/TODO 注释、运行时常量（字典 code 一类）。新增契约类型只往类型区追加，不就近插在调用它的方法上面。
+- **方法签名里不写匿名对象类型**：`(params: { pageNo: number; keyword?: string })` 这类内联字面量必须提取为类型区的命名 `interface`；`request.get<{ list: X[]; total: number }>` 这类内联响应同样如此，分页响应直接复用全局 `PageResult<T>`，同文件已有同形状类型直接引用不重复声明。内联写法的坏处是类型不在类型区、调用方无法复用、契约改动散落在方法体上。
 - API 层不得改字段、拼请求体、做类型转换/默认值/业务校验，也不得解包、映射、格式化或补充响应；这些业务适配由调用方或页面邻近 `utils.ts` 完成。
-- 接口类型集中在 `src/api/...`；组件仅导入使用，局部 UI 状态类型可保留在组件内。请求封装已处理响应/错误时，调用方直接 `await`，不重复解包或自造响应协议；同一原始接口数据只请求一次。
+- 接口契约类型（请求入参、响应体、行/项、字典枚举）只定义在 `src/api/{业务模块}/*.ts`（或同模块 `types.ts`），`src/views/**`、页面级 `utils.ts`、`src/types/**` 都不接受契约类型；组件仅导入使用。**豁免**：组件本地类型可以留在组件内——`interface Props` / `interface Emits` / 弹窗 `open()` 参数形状 / composable 的入参与返回类型 / `Pick`、`Omit` 派生的纯 UI 类型。判定口径是「这个类型描述的是后端契约还是前端控件的形态」，不是「这个类型在哪个目录」。
+- 请求封装已处理响应/错误时，调用方直接 `await`，不重复解包或自造响应协议；同一原始接口数据只请求一次。
 - 不因 API、Mock、字段或按钮存在推断权限。详细验收见 checklist E-007、E-008。
 - 用户显式授权接按钮权限时，权限只挂**页面级的写操作 / 执行类入口**（新增、编辑、删除、导入、导出、开播等）。两类一律不挂：**弹窗 / 抽屉内部的按钮**（入口按钮已通过校验，内部再校验是重复）、**query 类 key**（`*:query`、`*:category-query`、`*:stat:query` 等查询/统计语义，含表格操作列的「详情 / 进度 / 历史」跳转与「管理分类」一类入口）——能看到页面即已具备查询权限，挂上去只会让搜索区、详情跳转、Tab / 区域整体凭空消失；尤其不得把 query 判断写进 `getList()`，那会让无该权限的人列表永远空白。菜单里某个 key 的唯一落点属于这两类时，按「无落点（规则排除）」写进结果文档，不硬塞。
 - 例外：若某块的 query 权限是**成套设计**（如聊天工作台的 tab 可见性 + API 层按权限跳过对应端点），不拆——拆了会让门控 tab 对所有人可见并发出 403 请求；这类按偏离记录，等用户拍板。

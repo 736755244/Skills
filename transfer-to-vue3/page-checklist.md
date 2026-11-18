@@ -21,18 +21,18 @@ tags:
 
 | ID 段 | 范围 | ID 段 | 范围 |
 |---|---|---|---|
-| **B-** 弹窗（Dialog / 嵌套 / tooltip） | B-001 ~ B-012 | **S-** 搜索区 | S-001 ~ S-013 |
-| **T-** 表格列 | T-001 ~ T-010 | **R-** 路由/列表/操作列/一屏/空态/Tab | R-001 ~ R-009 |
+| **B-** 弹窗（Dialog / 尺寸 / 嵌套 / tooltip） | B-001 ~ B-013 | **S-** 搜索区 | S-001 ~ S-014 |
+| **T-** 表格列 | T-001 ~ T-011 | **R-** 路由/列表/操作列/一屏/空态/Tab | R-001 ~ R-010 |
 | **F-** 表单校验 | F-001 ~ F-008 | **U-** 用户授权例外（2026-09-15） | U-001 ~ U-008 |
-| **V-** 数值字段 | V-001 ~ V-007 | **E-** 导出 / 接口化 / 详情页 | E-001 ~ E-008 |
+| **V-** 数值字段 | V-001 ~ V-007 | **E-** 导出 / 接口化 / 详情页 / API 类型 | E-001 ~ E-009 |
 | **P-** 提示与成功文案 | P-001 ~ P-004 | **D-** 字典列/字典刷新链 | D-001 ~ D-003 |
-| | | **总** | 82 条 |
+| | | **总** | 87 条 |
 
 **通用检测前提**：所有 grep 在 `<本次目录>`（即 `src/views/<module>/<page>/`）下，排除 `node_modules`。
 
 ---
 
-## B — 弹窗（12 条）
+## B — 弹窗（13 条）
 
 ### B-001 全局 Dialog 替换 el-dialog
 
@@ -72,10 +72,29 @@ tags:
 **自动检测**：`grep -rn "confirmButtonClass.*el-button--danger" <本次目录>/`。
 **Chrome 验证**：打开确认框 → 读确认按钮 `className` 含 `el-button--danger`。
 
-### B-007 弹窗宽度四档
+### B-007 弹窗宽度四档（600 / 900 / 1200 / 1400）
 
-**规则**：`<Dialog width="...">` 只用 `600px` / `900px` / `1200px` / `1600px`；源或旧稿的 520/560/720/860/1000 就近归位（520/560/720 → 600；860/1000 → 900）。
-**自动检测**：`grep -rn 'width="\(600\|900\|1200\|1600\)px"' <本次目录>/`；`grep -rn 'width="\(520\|560\|720\|860\|1000\)\b' <本次目录>/` 应为 0。
+**规则**：`<Dialog width="...">` 只用 `600` / `900` / `1200` / `1400` 四档。写法二选一：数字绑定 `:width="900"` 或带单位字符串 `width="900px"`；**禁止**无单位字符串 `width="600"`——Element Plus 原样拼成 `width: 600`，CSS 判定非法整条丢弃，弹窗静默退回默认 `40%`，且在 1400 屏上肉眼像"没设宽度"。
+
+**归位映射**（源宽度不落在边界上时按区间归档）：
+
+| 源宽度 | 归档 | 典型值 |
+|---|---|---|
+| < 750 | 600 | 380 / 420 / 460 / 520 / 560 / 720 |
+| 750 – 1049 | 900 | 800 / 860 / 1000 |
+| 1050 – 1299 | 1200 | 1100 / 1200 |
+| ≥ 1300 | 1400 | 1300 / 1440 / 1600 |
+| 未写 `width`（默认 `40%`）/ `50%` | 900 | — |
+| `80%` / `90%` / `95%` | 1400 | 百分比一律归最大档 |
+| `min(900px, 75vw)` 一类 | 取 `min` 的第一个参数 | 900 |
+| 三元 `isX ? 900 : 1200` | 取较大值 | 1200 |
+
+- **保底 900**：原宽 660–749 且内容含 `el-table` / `el-tabs` / `el-col` 的不降到 600——降到 600 会挤压表格列与左右分栏，宁可多给一档。
+- 纯确认框（原 380–460，只有一行文案 + 两个按钮）同样归 600，不单独设档；不为"看起来更小"再开新档。
+- 小屏兜底由 `Dialog.vue` 的 `max-width: calc(100vw - 32px)` 统一给，页面**不**再自写 `width: 95%` / `max-width: 90vw` / 媒体查询改宽。
+
+**自动检测**：`grep -rhoE '<Dialog[^>]*width="[^"]*"' <本次目录>/ | grep -oE 'width="[^"]*"'` 输出的取值应只落在四档；`grep -rnE '(^|[^:a-zA-Z])width="[0-9]+"' <本次目录>/` 应为 0（无单位字符串）。
+**Chrome 验证**：逐个弹窗读 `.el-dialog` 的 `getBoundingClientRect().width` 等于档位值；视口不足 `档位 + 32` 时收窄到 `100vw - 32`；`document.body` 横向溢出为 0。
 
 ### B-008 嵌套弹窗拆独立组件 + append-to-body
 
@@ -106,6 +125,48 @@ tags:
 **规则**：弹窗需要的字典（分类 / 标签）由弹窗 `await loadXxx()` 取；**页面 / 父弹窗都不传字典 props**。
 **自动检测**：`grep -rn "defineProps.*[Cc]ategor\|defineProps.*[Dd]ict" <本次目录>/` 应为 0（字典不应通过 props 传）。
 **Chrome 验证**：打开弹窗 → 字典下拉直接有选项（不闪"暂无分类"）。
+
+### B-013 弹窗高度：只给一次，单层滚动
+
+**规则**：带列表、表格或分栏的业务弹窗统一写 `<Dialog :scroll="false">`，由内容根节点给**唯一**一次高度 `height: calc(100vh - 300px); overflow: hidden`，内部用 flex 链把剩余空间交给表格 / 局部列表，滚动只发生在表格或那块列表里。
+
+```html
+<Dialog v-model="visible" :scroll="false" :width="900" title="…">
+  <div class="xxx-dialog"><!-- 唯一高度在这里 -->
+    <div class="xxx-head">…</div><!-- flex-shrink: 0 -->
+    <div class="xxx-body">
+      <div class="xxx-left">…<el-table height="100%" /></div>
+      <div class="xxx-right">…</div>
+    </div>
+  </div>
+</Dialog>
+```
+
+```scss
+.xxx-dialog { display: flex; flex-direction: column; height: calc(100vh - 300px); overflow: hidden; }
+.xxx-dialog > .xxx-head { flex-shrink: 0; }
+.xxx-body  { display: flex; gap: 12px; flex: 1; min-height: 0; }
+.xxx-left  { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+```
+
+**禁止**：
+- **双层滚动**：开了 `scroll`（默认 `true`）又给内容设 `max-height` / `height`。外壳 `ElScrollbar` 已有 `max-height: calc(100vh - 300px)`，两套高度叠加 → 弹窗外滚一层、内容再滚一层。
+- **自定义高度**：页内写 `max-height="640"` / `height="500px"` / `height: 75vh` / `max-height: 90vh`。高度只由上面那一个 `calc` 决定，`Dialog` 的 `maxHeight` prop 不再由页面传。
+- **中间层断链**：漏 `min-height: 0`、漏 `flex-direction: column`、给子级写死 `minmax(380px, 3fr)` 这类保底值。`flex: 1` 的表格会把容器撑高，`overflow: hidden` 直接裁掉下半部分（实测 `minmax(380px, …)` 在内容高只剩 206px 时必裁）。UnoCSS 的 `flex-1` 不带 `min-h-0`，等价于这条。
+- **`el-table-v2` 不给父高**：`el-auto-resizer` 靠父容器测量，父级缺 `height` / `flex: 1; min-height: 0` 时表格塌成 0 高。虚拟表格另需给 `:row-height`。
+
+| 内容结构 | 需要贯通的那条链 |
+|---|---|
+| 左右直接分栏 | `根 → .body(flex, min-height:0) → 左/右(flex-direction:column, min-height:0)` |
+| `el-form` 包裹 | `根 → el-form(flex:1, min-height:0, flex-direction:column) → form-item 区` |
+| `el-tabs` 包裹 | `根 → el-tabs(flex:1, min-height:0, flex-direction:column) → .el-tabs__content(flex:1, min-height:0) → .el-tab-pane(height:100%)` |
+| `el-row` / `el-col` | `el-row` 与 `el-col` 各补 `flex: 1; min-height: 0`（`el-col` 默认 `height: auto`） |
+| grid | 容器 `display: grid; grid-template-rows: auto 1fr; min-height: 0`，行高用 `1fr` 不用固定 px |
+
+**例外（可保留固定高）**：媒体预览类——凭证图 360 / 400、视频预览 400、裁剪框 300 / 220。高度随素材比例走，不参与一屏口径。
+
+**自动检测**：`:scroll="false"` 的文件与含 `height: calc(100vh` 的文件应一一对应；`grep -rn 'max-height: [0-9]\{3\}px\|:max-height=\|height="[0-9]\{3\}"\|: [0-9]\{2,3\}vh' <本次目录>/` 命中项应只剩媒体预览例外。
+**Chrome 验证**：打开弹窗后逐层量——内容根节点 `clientHeight` = 视口高 − 300；`.el-dialog__body` 的 `clientHeight == scrollHeight`（零溢出）；不出现 `.el-scrollbar`（或它的 `clientHeight == scrollHeight`）；表格 `clientHeight` = 剩余高度且内部滚动；视口缩到 860×760 仍只有一层滚动。
 
 ---
 
@@ -547,7 +608,7 @@ tags:
 
 ---
 
-## E — 导出 / 接口化 / 详情页（8 条）
+## E — 导出 / 接口化 / 详情页 / API 类型（9 条）
 
 ### E-001 列表跳详情使用编码的 detail/:params
 
@@ -599,6 +660,13 @@ tags:
 
 **规则**：`html-to-vue3` 不创建 API 文件；`dist-to-vue3` 仅生成类型和无真实调用的预留方法。未收到用户显式 `apifox-link` 授权时，转换与浏览器验证不得发起真实读写请求，写操作尤其不得执行；需要对接的条目必须标记为后续 `apifox-link`，浏览器验证也不得把真实接口成功响应作为转换完成证据。
 **自动检测**：人工核对本次范围的 API 方法均为 Mock/安全空实现/预留位，并检查结果文档没有将未对接条目标为真实接口成功。
+
+### E-009 契约类型集中在 API 文件上部
+
+**适用**：`dist-to-vue3` 生成的 API 文件，以及 `apifox-link` 已接入的 API 文件；`html-to-vue3` 不创建 API 文件，标记为 `not_applicable`。
+
+**规则**：接口契约的 `type` / `interface`（请求入参、响应体、行/项、字典枚举）只定义在 `src/api/{业务模块}/*.ts`（或同模块 `types.ts`），不写进 `src/views/**`、页面 `utils.ts` 或 `src/types/**`。同一 API 文件内固定三段顺序：`import` → 类型区（全部 `type` / `interface`，连同文档注释和分段注释一起在上）→ 接口方法区（`export const` 方法与运行时常量）；类型不得穿插在方法之间或写在方法之后。方法签名不留匿名对象类型：`(params: { pageNo: number; … })`、`request.get<{ list: X[]; total: number }>` 都要提取成类型区的命名 `interface`，分页响应复用全局 `PageResult<T>`，同文件已有同形状类型直接引用不重复声明。**豁免**：组件本地类型留在组件内——`interface Props` / `interface Emits` / 弹窗 `open()` 参数形状 / composable 入参与返回 / `Pick`、`Omit` 派生的纯 UI 类型；判定口径是「描述后端契约还是描述前端控件形态」。
+**自动检测**：`grep -nE "^\s*(export )?(interface|type) |^\s*export const" src/api/<本次模块>/` 核对首个 `export const` 之后不再出现类型声明；`grep -rnE "\((params|data)[A-Za-z0-9_]*\s*:\s*\{|request\.(get|post|put|delete|upload|download)<\{" src/api/<本次模块>/` 应为 0；`grep -rnE "^\s*(export )?(interface|type) [A-Za-z]" <本次目录>/` 的命中应全部属于豁免类别，出现 `*ReqVO` / `*RespVO` 一类契约命名即为契约外流。
 
 ---
 

@@ -30,6 +30,7 @@
 - `html-to-vue3` 不创建 API 文件；`dist-to-vue3` 仅生成无真实调用的类型/预留 API；真实接口接入仍只能由用户显式调用 `apifox-link` 后进行。
 - `apifox-link`、`clean-build-vue3` 必须由用户单独、明确调用；未收到明确调用指令时，任何 Skill 都不得触发 Apifox MCP、API 对接、权限写入或清理操作。
 - 详情页采用 `detail/:params` 编码路径参数；编码仅用于序列化与降低可读性，不是敏感数据保护或鉴权机制，详见 [standards.md](transfer-to-vue3/standards.md)。
+- 接口契约类型（请求入参、响应体、行/项、字典枚举）只定义在 `src/api/**`，同一文件固定三段顺序：`import` → 类型区（全部 `type` / `interface` 在上）→ 接口方法区（`export const` 在下）；方法签名和 `request.get<...>` 不留匿名对象字面量。组件本地类型（`Props` / `Emits`、弹窗 `open()` 参数、composable 入参与返回、`Pick`/`Omit` 纯 UI 类型）留在组件内，见 checklist E-009。
 - `ui-verify-playwright` 使用 Playwright Chrome 做可复跑 E2E；转换类 Skill 的页面证据使用 Chrome DevTools MCP。两者不能互相替代。
 
 ## 目录约定

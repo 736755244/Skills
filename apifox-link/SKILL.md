@@ -14,6 +14,7 @@ description: "依据后端已提供的接口定义，逐条核对页面 Mock，�
 - 接口契约和字段模型只能来自后端定义或 Apifox；本地 Mock、字段、按钮或组件行为不能反向定义、筛选或匹配接口。
 - 对于已确认且可直接使用的接口，以接口请求/响应字段覆盖本地 Mock 的字段模型和页面读取方式；只有接口语义、URL/方法或字段无法直接落地时，才汇总为人工确认项。
 - 本 Skill 不创建或修改 Apifox，不设计权限，不自动迁移/重命名页面；API 文件遵循 [通用 API 规范](../transfer-to-vue3/standards.md)：仅放契约类型、接口方法与必要请求封装 import，每个方法只接收一个 `params`（GET）或 `data`（POST/PUT/DELETE）入参并原样透传。
+- 接入时契约类型只落在该 API 文件上部的类型区：文件固定 `import` → 类型区（全部 `type` / `interface`，含文档注释和分段注释）→ 接口方法区（`export const` 与运行时常量）三段；方法签名和 `request.get<...>` 里不写匿名对象字面量，分页响应用全局 `PageResult<T>`，同形状类型引用不重复声明。页面/组件里描述后端契约的类型改为从这里导入后删除本地声明，组件本地类型（`Props` / `Emits` / 弹窗 `open()` 参数 / composable 入参返回 / `Pick`·`Omit` 纯 UI 类型）留在组件内。按 [page-checklist.md](../transfer-to-vue3/page-checklist.md) E-009 验收。
 - 不在 API 层做字段改名、请求体拼装、默认值、类型转换、业务校验或响应加工；已确认需要的业务适配写在调用方或页面邻近的 `utils.ts`。
 - `MISSING`、`FUZZY`、`TYPE_MISMATCH`、未确认或无法直接适配的条目继续使用 Mock。
 - restore 迁移是单独的文件范围确认项；未确认不得移动、重命名或更新引用。

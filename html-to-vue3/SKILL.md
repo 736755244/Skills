@@ -33,6 +33,16 @@ description: "消费已拆分的 HTML 原型，将用户选择的页面转换为
 - 原输入包含图标的搜索/重置、导入/导出、添加/上传、编辑/删除、工具栏或页面级动作，必须使用项目 `Icon` 等价还原；搜索区使用项目全局 `SearchForm`（折叠、「更多筛选 / 收起」与搜索/重置按钮由组件内置），列表骨架按 checklist S-009 ~ S-011 与 [standards.md](../transfer-to-vue3/standards.md) 的全局版式层落位，页内**不**再自调 `.el-form--inline .el-form-item` 的 bottom margin 或多行 gap。
 - 原输入没有的业务动作、API、权限码、`checkPermi` 和真实写请求保持不存在。
 
+## 弹窗尺寸口径
+
+页面里的弹窗一多，尺寸分叉比字段差异更难收拾：口径只在 checklist **B-007（宽度四档）** 与 **B-013（高度只给一次）** 定义一次，本 Skill 在生成时就直接按口径产出，不留到事后统一。
+
+- **宽度**：只用 `600 / 900 / 1200 / 1400` 四档，按源宽度区间归位（<750→600、750–1049→900、1050–1299→1200、≥1300→1400；无 `width` 与 `50%` → 900，`80~95%` → 1400）。写 `:width="900"` 或 `width="900px"` 都行，**不写无单位字符串** `width="600"`——Element Plus 不补 `px`，CSS 丢弃整条，弹窗悄悄退回 `40%`。小屏收窄由 `Dialog.vue` 的 `max-width: calc(100vw - 32px)` 兜住，页面不自写百分比宽度。
+- **高度**：`<Dialog :scroll="false">` + 内容根节点 `height: calc(100vh - 300px); overflow: hidden`，内部 `flex: 1; min-height: 0` 把剩余空间交给表格，滚动只出现在表格/局部列表。**不传** `maxHeight`，**不写** `max-height="640"` / `height: 75vh` / `height="500px"`，否则外壳 `ElScrollbar` 与内容两层高度叠加成双层滚动。
+- **媒体预览例外**：凭证图、视频、裁剪框保留固定高（360 / 400 / 300 / 220），高度随素材比例走。
+- **flex 链要贯通**：`el-form`、`el-tabs`、`el-row/el-col`、grid 都会在中间吃断 flex 链，各自补 `flex: 1; min-height: 0`（`el-tabs` 还要贯通 `.el-tabs__content` 与 `.el-tab-pane`）；`el-table-v2` + `el-auto-resizer` 必须有父高，否则塌成 0。UnoCSS 的 `flex-1` 不带 `min-h-0`，要显式补。
+- **验收口径**：内容根节点 `clientHeight` = 视口高 − 300；`.el-dialog__body` 的 `clientHeight == scrollHeight`；860×760 下仍只有一层滚动。这三项量不出来，就是没改对，不能以"看起来正常"收工。
+
 ## 结果
 
 输出 `.middleproduct/html-to-vue3-result.md`，遵循 [结果契约](../transfer-to-vue3/result-contract.md)，以**转换单元**为最小记录粒度：每个路由/逻辑页面组单独记录输入、布局分类/参考页、物理 Tab 成员到最终单一组件/路由的映射、完整 Mock/专用组件、格式化/lint、原 HTML—Vue Chrome 对照、逐项交互证据、差异和修复。一个单元未闭环验收时不得记录下一个单元为已开始或已完成。每单元完成后停止，等待用户继续选择下一个单元；后续 API、权限、清理或 Playwright 验证仅作为用户可选项，不自动执行。
