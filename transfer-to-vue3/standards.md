@@ -102,6 +102,58 @@ tags:
 - **删页内 `gap` 之前先判主轴方向**：根节点是 `flex-direction: column` 时那句 `gap` 是「搜索 wrap ↔ 列表 wrap」的纵向间距，合并成单 wrap 后确实该删；根节点是横向（`row` 或没写 direction 的默认 row）时那句 `gap` 是**左右面板间距**，删了两块就贴死，必须换成 `panel-row` / `var(--app-panel-gap)` 而不是直接删。同一批删除动作还要回扫块内元素间距（如统计条 `.stat-bar`、行内控件组 `.scope-item`），它们与面板间距无关，按原值保留。
 - 页面确实不属于该骨架（双面板工作台、卡片网格、嵌套列表、整页滚动）时，保留原排版并在页内注释写明原因，同时按标准数值就地给出所需间距；结果文档记为偏离，不强行套 `.list-page`。**但不套骨架 ≠ 不撑满一屏**：内容不足一屏时最后一张卡也要贴到视口底，写法是根节点 `min-height: var(--app-page-height)`（不用 `height`，内容超出时仍能整页滚动）+ 最后一块 `flex: 1`；块内是 grid 时补 `align-content: start`，否则 `align-content` 默认的 stretch 会把卡片行拉高变形。双面板页即使不套 `.list-page`，面板间距仍走 `panel-row` / `--app-panel-gap`。
 
+### 弹层统一：全局 Drawer（2026-11-23 起）
+
+原生的 `<el-drawer>` 一律收敛到项目全局 `Drawer` 组件，与上面的全局 `Dialog` 同构。此条是工程基线，不属于某次转换的临时适配。
+
+| 层 | 正确做法 | 反例（禁止） |
+|---|---|---|
+| 全局 `Drawer` | `v-model` 受控：props `modelValue` + emits `update:modelValue`，attrs/slots/events 透传 | 做成 `defineExpose({ open, close })` 命令式组件 |
+| 业务抽屉组件 | 模板 `<Drawer v-model="visible">`；内部 `open(row)` 做数据初始化 + `visible.value = true`；`defineExpose({ open })` | 在抽屉内部再调 `drawerRef.value.open()` 二次打开 |
+| 引入页面 | `xxxRef.value.open(row)` | 页面直接改 `visible` 或用 prop 双向同步 |
+
+`open` 的调用方永远是页面，抽屉内部只负责「置数据 + 置 visible」。业务侧只换标签名，模板内容、属性（size / direction / with-header / append-to-body / destroy-on-close / before-close / custom-class / class）、slot 与事件绑定原样保留；`src/components/Drawer/src/Drawer.vue` 参考实现：
+
+```vue
+<template>
+  <ElDrawer
+    v-bind="getBindValue"
+    @update:model-value="emits('update:modelValue', $event)"
+    @close="emits('close')"
+    @closed="emits('closed')"
+    @open="emits('open')"
+    @opened="emits('opened')"
+  >
+    <template v-if="$slots.header" #header><slot name="header"></slot></template>
+    <slot></slot>
+    <template v-if="$slots.footer" #footer><slot name="footer"></slot></template>
+  </ElDrawer>
+</template>
+<script setup lang="ts">
+import { propTypes } from '@/utils/propTypes'
+defineOptions({ name: 'Drawer', inheritAttrs: false })
+const props = defineProps({ modelValue: propTypes.bool.def(false) })
+const emits = defineEmits(['update:modelValue', 'close', 'closed', 'open', 'opened'])
+const getBindValue = computed(() => ({ ...useAttrs(), ...props }))
+</script>
+```
+
+`src/components/Drawer/index.ts` 只导出组件本体，不要额外导出命令式实例类型（受控模式下业务用不到，会误导后来人走回老路）。unplugin-vue-components 扫描 `src/components/**/*.vue` 自动注册为全局 `<Drawer>`，业务模板无需 import；`src/types/auto-components.d.ts` 由生成器维护，不手改。
+
+两个必踩坑：
+
+- **`defineEmits` 声明 `update:modelValue` 会把它从 `$attrs` 摘掉、不再随 `v-bind` 透传给 ElDrawer**，组件自身又没手动 emit，导致原生关闭按钮关了抽屉但父级 `visible` 仍是 `true`。必须显式写 `@update:model-value="emits('update:modelValue', $event)"`。验证时必须点**原生 header 关闭按钮**，不要用模板里的取消按钮设 `visible=false`（那样绕过了受控回写，测不出问题）。
+- **`<slot/>` 自闭合触发 ESLint `vue/html-self-closing`**，一律写 `<slot></slot>`。`ts:check` 抓不到模板 lint 错误，只有起服务看浏览器 error overlay 能发现。
+
+批量替换与特殊场景：
+
+- 用脚本逐文件替换 `<el-drawer` → `<Drawer`、`</el-drawer>` → `</Drawer>`，并核对每文件开闭标签计数相等；替换后 `<el-drawer` 应为 0 处。残留的 `el-drawer` 字样只允许是渲染后的 CSS 选择器（`.el-drawer__body` / `__header` / `__footer`，属 Element Plus 内部 class）或注释，禁止替换删除。
+- props 双向 + 无 `defineExpose`（如 `defineProps({show, id})` + `watch(show, v => visible = v)`）：删掉 props 和所有相关 watch，改 `open(id)` 内加载数据 + `visible=true` + `defineExpose({open})`；**父组件必须同步改**，删掉 `isShow` / `curId` 一类中间状态和 `handleOpen` / `handleClose`，收敛为 `xxxRef.value?.open(id)`，只改子组件会留下失效的 prop 绑定。
+- `watch(visible)` 打开时初始化（`watch(showX, v => { if(!v) return; init() })`）：把回调体提成 `initXxx()`，在打开方法里「打开前」调用后删掉 watch；关闭清理（`watch(visible, v => { if(!v) reset() })`）迁到 `@closed="handleClosed"`。
+- 监听业务数据变化的 watch（如 `watch(() => props.session.id, () => visible = false)` 切会话关抽屉）不是显隐双向，保留。命中的 `watch(visible)` 若属于 Dialog 组件（ImportDialog、ReceiverSelectDialog、MaterialPickerDialog 等）不在本次范围。
+- 页面内联抽屉同样换 `<Drawer v-model>`，有 watch-visible 的按上条迁移，随页面逻辑走。
+- 全库批量替换前按 [result-contract.md](./result-contract.md) 第 3 节展示影响范围和备份位置并确认；先做 1 个简单抽屉 + 1 个带 `watch(visible)` 的样板，真机验证通过再规模化，范围由用户定、不自动扩张。
+
 
 ---
 
@@ -141,6 +193,10 @@ tags:
 - 使用 Chrome DevTools MCP 检查可导航性、404/Console Error、标题、表格、弹窗、Tab、文案和必要样式对照；逐页验收按 [page-checklist.md](./page-checklist.md)。
 - 类型检查使用 `pnpm ts:check`；只对本次目录运行不带 `--fix` 的 `npx eslint --ext .ts,.vue`。
 - **禁止**使用 `pnpm lint:eslint <路径>` 校验产物：该脚本会退化为全库 `--fix`。
+- **类型错误用基线对比判定，不看总数增减**：改动前后各跑一次 `ts:check` 落盘，grep 本次改动文件名逐条比对。项目本身有历史类型错误时，总数不变不代表无新增；同一错误只是行号偏移（某文件删了几行）属于既有错误，只有 before 没有、after 才出现的才算引入。
+- **裸挂载业务组件报 `setupContext` 是脚手架假阳性**：业务组件用了自动导入的 `useMessage` / `useRouter` / pinia store，裸 `createApp` 挂载会报 `Cannot read properties of null (reading 'setupContext')`（缺 provider 注入）。判别方法是挂载一个未改动的对照组件，报同样错即可证明与改动无关。验组件契约就挂无外部依赖的全局组件本体，验业务组件要走真实页面导航让真实 app 提供上下文。
+- console 里的 `登录超时,请重新登录!`、资源 404 等若与被测交互无关，记为既有环境问题，不算改造失败；关注组件解析失败、编译错误、v-model 不回写这类真正相关的错误。未拿到真实浏览器证据的条目按结果契约标 `blocked` / `not_run`，不得标 `success`。
+- 若 `src/types/auto-components.d.ts` 这类未纳入 git 的生成文件被历史脏数据写坏（混入 `*.md`、`vite.config.mts.timestamp*` 等非法标识符）导致 `ts:check` 直接报语法错误：跑检查前临时替换为最小干净声明、跑完立即还原备份；生成器管理的文件不手动清理脏条目（会与生成器冲突），在结果里如实标注为既有问题。
 
 ---
 
