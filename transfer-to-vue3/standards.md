@@ -102,6 +102,46 @@ tags:
 - **删页内 `gap` 之前先判主轴方向**：根节点是 `flex-direction: column` 时那句 `gap` 是「搜索 wrap ↔ 列表 wrap」的纵向间距，合并成单 wrap 后确实该删；根节点是横向（`row` 或没写 direction 的默认 row）时那句 `gap` 是**左右面板间距**，删了两块就贴死，必须换成 `panel-row` / `var(--app-panel-gap)` 而不是直接删。同一批删除动作还要回扫块内元素间距（如统计条 `.stat-bar`、行内控件组 `.scope-item`），它们与面板间距无关，按原值保留。
 - 页面确实不属于该骨架（双面板工作台、卡片网格、嵌套列表、整页滚动）时，保留原排版并在页内注释写明原因，同时按标准数值就地给出所需间距；结果文档记为偏离，不强行套 `.list-page`。**但不套骨架 ≠ 不撑满一屏**：内容不足一屏时最后一张卡也要贴到视口底，写法是根节点 `min-height: var(--app-page-height)`（不用 `height`，内容超出时仍能整页滚动）+ 最后一块 `flex: 1`；块内是 grid 时补 `align-content: start`，否则 `align-content` 默认的 stretch 会把卡片行拉高变形。双面板页即使不套 `.list-page`，面板间距仍走 `panel-row` / `--app-panel-gap`。
 
+### 列表加载态与按钮状态（2026-11-27 起）
+
+只保留一个请求中标志 `loading`，列表相关动作一律整表遮罩，列表上方按钮弱化控制。逐条验收见 [page-checklist.md](./page-checklist.md) L-001 ~ L-009。
+
+| 场景 | 正确做法 | 不再出现 |
+|---|---|---|
+| 请求中标志 | 一个 `const loading = ref(false)`，`try/finally` 复位 | `submitting` / `saving` / `statusSaving` / `sendLoading` / `batchDeleteLoading` 等语义化别名 |
+| 行状态切换 | `<el-table v-loading="loading">` 整表遮罩 | `row.statusLoading` / `statusLoading[row.id]` / `UpdatingIds` 行级状态 |
+| 行内控件 | 依赖表格遮罩，只保留业务自身 disabled | `:loading="loading"` / `:disabled="... \|\| loading"` |
+| 批量动作 | 复用同一个 `loading` | `batchDeleteLoading` / `resendLoading` / 按动作拆开的标志 |
+| 多 Tab 页面 | 共用一个 `loading` | `memberLoading` / `availableLoading` 等按 Tab 拆分的标志 |
+| 列表上方按钮 | 可点击，校验放函数入口 | `:loading`、`:disabled="!selectedXxx.length"`、`:disabled="loading"` |
+| 接口竞态 | 不做防抖/序号判断 | `systemQuerySequence` / `requestSequence` / `if (sequence === xxx)` |
+| 上传中通知父级 | `busy` / `@busy` 保留（防抽屉关闭中断上传） | 把 `busy` 当提交别名改成 `loading` |
+
+真实业务状态锁照旧保留：活动已结束 / 已开播 / 无数据可操作 / `checkPermi` 无权限、以及入口级 `v-if="checkPermi([...])"`。这些是业务约束，不是"未选中"或"请求中"的替代实现。
+
+```vue
+<el-table v-loading="loading" :data="list">…</el-table>
+<el-dropdown @command="batchAction">…</el-dropdown>
+```
+
+```ts
+const batchAction = async () => {
+  if (!selectedUserIds.value.length) {
+    message.warning('请先选择员工')
+    return
+  }
+  loading.value = true
+  try {
+    await api.batchAction(selectedUserIds.value)
+    await loadData()
+  } finally {
+    loading.value = false
+  }
+}
+```
+
+未选中时**必须给提示**，不能静默 `return`；提示用 `message.warning`（见 checklist P-001），且按钮不能被 `:disabled="!selectedXxx.length"` 拦住，否则提示不可达。跨组件 props 与本地 `loading` 撞名时入站改 `listLoading`，本地保持 `loading`。
+
 ### 弹层统一：全局 Drawer（2026-11-23 起）
 
 原生的 `<el-drawer>` 一律收敛到项目全局 `Drawer` 组件，与上面的全局 `Dialog` 同构。此条是工程基线，不属于某次转换的临时适配。

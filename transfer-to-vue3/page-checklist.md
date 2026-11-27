@@ -26,7 +26,8 @@ tags:
 | **F-** 表单校验 | F-001 ~ F-008 | **U-** 用户授权例外（2026-09-15） | U-001 ~ U-008 |
 | **V-** 数值字段 | V-001 ~ V-007 | **E-** 导出 / 接口化 / 详情页 / API 类型 | E-001 ~ E-009 |
 | **P-** 提示与成功文案 | P-001 ~ P-004 | **D-** 字典列/字典刷新链 | D-001 ~ D-003 |
-| | | **总** | 87 条 |
+| **L-** 加载态与列表按钮状态（2026-11-27） | L-001 ~ L-009 | | |
+| | | **总** | 96 条 |
 
 **通用检测前提**：所有 grep 在 `<本次目录>`（即 `src/views/<module>/<page>/`）下，排除 `node_modules`。
 
@@ -555,6 +556,73 @@ tags:
 **为什么只留一个**：历史上三处各写各的（有的补 0、有的不补、有的截前 6 位），同一个人在不同页面显示成两个 ID，排查问题时对不上。规则本身不是重点，**只有一个实现**才是。
 **自动检测**：`grep -rn "slice(-6)\|padStart(6" src/views` 应只剩 `src/utils/displayUserId.ts` 命中的调用形式；出现裸写 `String(...).slice(-6)` 即违规。
 **Chrome 验证**：同一学员在列表列与详情抽屉里的 ID 文案完全一致。
+
+---
+
+## L — 加载态与列表按钮状态（2026-11-27，9 条）
+
+### L-001 请求中只用一个 `loading`
+
+**规则**：全仓「接口请求进行中」统一叫 `loading`。`submitting` / `saving` / `statusSaving` / `sendLoading` / `batchDeleteLoading` / `resendLoading` / `deleteLoading` / `memberLoading` 等语义化别名一律不新增，存量见到就收敛到 `loading`。`try/finally` 复位，异常分支只做行值回滚或提示，不再另置一个标志。
+**例外**：跨组件 props 与本地 `loading` 撞名时，入站那个改名为 `listLoading`（如 `SendOnlyChatBox` 的 props），本地仍叫 `loading`；上传中的 `busy` 不属于提交别名，见 L-009。
+**自动检测**：`grep -rn "submitting\|saving\|Loading = ref\|Loading = ref<boolean>" src/views` 人工核对；同名文件已有 `loading` 时先改名再合并，避免 `TS2451 Cannot redeclare`。
+
+### L-002 列表动作整表遮罩，不按行拆 loading
+
+**规则**：列表行改状态、单行启停、批量删除、批量改状态等**都只挂 `v-loading="loading"` 在 `<el-table>` 上**，不写 `row.statusLoading` / `row._statusLoading` / `statusLoading[row.id]` / `routeStatusUpdatingIds` 一类行级或按 id 索引的状态。等待接口期间整张表不可操作，行内的开关/按钮自然被遮罩挡住。
+**反例**：行开关 `:loading="row.statusLoading"` + 表格 `v-loading="loading"` 两套并行。
+**自动检测**：`grep -rn "statusLoading\|_statusLoading\|UpdatingIds\|Loading\[row" <本次目录>/` 应为 0。
+**Chrome 验证**：点行开关 → 整张表出遮罩，不是只有那一行转圈。
+
+### L-003 行内控件不叠加 loading 判断
+
+**规则**：表格已 `v-loading="loading"` 时，行内 `el-switch` / `el-button` / 勾选框**不再**写 `:loading="loading"` 或 `:disabled="... || loading"`；业务自身的禁用（无企微号、无权限）照旧保留。
+**自动检测**：`grep -rn "|| loading\|:loading=\"loading\"" <本次目录>/` 命中行内控件即违规。
+**Chrome 验证**：请求进行中整表遮罩生效，行内控件不出现第二套 spinner。
+
+### L-004 批量操作复用同一个 loading
+
+**规则**：批量删除、批量改状态、批量重发等**不新增** `batchDeleteLoading` / `resendLoading` / `deleteLoading`；进入操作就把列表的 `loading` 置 true，结束（含异常）在 `finally` 复位。多条动作共用一个 `loading` 串行执行即可。
+**自动检测**：`grep -rn "batch.*Loading\|deleteLoading\|resendLoading" <本次目录>/` 应为 0。
+**Chrome 验证**：触发批量删除 → 遮罩出现；请求结束 → 遮罩消失且列表已刷新。
+
+### L-005 多 Tab 共用一个 loading
+
+**规则**：同页多个 Tab（含左右双面板的多列表）**共用一个 `loading`**，不按 Tab 拆 `memberLoading` / `availableLoading` / `tabLoading`；切 Tab 时不重置别的 Tab 的状态，因为只有一个。
+**自动检测**：`grep -rn "Loading = ref" <本次目录>/` 检查是否仍有按 Tab 命名的标志。
+**Chrome 验证**：在 A Tab 触发请求 → B Tab 若同时可见也处于同一加载态，不会出现一个转圈一个可点。
+
+### L-006 列表上方按钮不靠 loading / 未选中 disabled 拦截
+
+**规则**：列表上方操作行（含批量操作下拉、导出按钮）**不**加 `:loading`、`不`加 `:disabled="!selectedXxx.length"`、不因请求中写 `:disabled="loading"`。按钮始终可点，前置校验放到函数入口（见 L-007）。**保留**真实业务状态锁（活动已结束 / 已开播 / 数据范围为 0 / 存在失败收件人 / `checkPermi` 无权限）和 `v-if` 权限入口——这些不是"未选中"占位锁。
+**自动检测**：`grep -rn ":disabled=\"!selected\|:disabled=\"loading\|:loading=\"[a-zA-Z]*Loading\"" <本次目录>/` 命中工具条按钮即核对。
+**Chrome 验证**：未选数据时按钮仍可点击并弹出提示；活动已结束等真实锁仍禁用。
+
+### L-007 前置校验给提示，不静默 return
+
+**规则**：批量动作入口发现未选中数据，写 `message.warning('请先选择员工')` 后 `return`（文案按对象替换：员工 / 分类 / 课程…），**不**只写 `if (!selected.length) return`。提示用 warning 不用 error，见 P-001。注意与 L-006 配套：按钮若被 disabled 拦住，这条提示永远不会触发。
+**反例**：`if (!selectedUserIds.value.length) return`。
+**正例**：
+
+```ts
+if (!selectedUserIds.value.length) {
+  message.warning('请先选择员工')
+  return
+}
+```
+
+**Chrome 验证**：未勾选任何行 → 点批量操作任一项 → 出黄色 warning，不发请求。
+
+### L-008 不写接口竞态序号
+
+**规则**：不写 `systemQuerySequence` / `replyRequestSequence` / `requestSequence` / `shareRequest` 一类「只处理最后一次响应」的防抖/竞态序号，也不写 `if (sequence === xxxSequence)` 判断。当前口径是不处理接口抖动；真出现竞态另立需求再谈。搜索条件与分页照常提交，序号不参与业务。
+**自动检测**：`grep -rn "Sequence\|sequence ===\|shareRequest" <本次目录>/` 应为 0。
+**Chrome 验证**：连续快速触发同一查询 → 不做序号判断，列表以最后一次渲染结果为准。
+
+### L-009 上传中的 `busy` 保留
+
+**规则**：跨组件用于「上传进行中，禁止关闭抽屉/离开页面」的 `busy` / `@busy` 是上传生命周期信号，不是提交别名，**保留**。典型如 `course-manage/template/components/ResourceField.vue`：上传中通知父级抽屉不要关闭，避免中断上传。不要因为 L-001 就把它改成 `loading`。
+**自动检测**：仅对 `busy` 相关命名人工核对语义，不做批量替换。
 
 ---
 
